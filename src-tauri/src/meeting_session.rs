@@ -264,6 +264,8 @@ impl MeetingSessionManager {
         *self.session_path.lock().unwrap() = Some(session_dir);
         *self.session_start_ms.lock().unwrap() = Some(start_ms);
 
+        self.is_active.store(true, Ordering::SeqCst);
+
         info!("[MEETING] Starting mic stream...");
         if let Err(e) = self.start_mic_stream() {
             error!("[MEETING] Failed to start mic stream: {}", e);
@@ -283,8 +285,6 @@ impl MeetingSessionManager {
         } else {
             info!("[MEETING] System stream started successfully");
         }
-
-        self.is_active.store(true, Ordering::SeqCst);
 
         info!("[MEETING] Meeting started: {}", session_id);
         let _ = self.app_handle.emit("meeting-started", &session_id);

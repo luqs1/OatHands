@@ -114,17 +114,17 @@ impl SystemAudioCapture {
 
             let result: Result<(), String> = (|| {
                 let config = thread_device
-                    .supported_input_configs()
-                    .map_err(|e| format!("No input configs: {e}"))?
+                    .supported_output_configs()
+                    .map_err(|e| format!("No output configs: {e}"))?
                     .find(|c| c.sample_format() == cpal::SampleFormat::F32)
                     .or_else(|| {
                         thread_device
-                            .supported_input_configs()
+                            .supported_output_configs()
                             .ok()?
                             .into_iter()
                             .next()
                     })
-                    .ok_or("No supported input config")?;
+                    .ok_or("No supported output config")?;
 
                 let sample_rate = config.min_sample_rate().0;
                 let channels = config.channels() as usize;
