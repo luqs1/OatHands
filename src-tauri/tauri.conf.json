@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Handy",
+  "productName": "OatHands",
   "version": "0.7.11",
-  "identifier": "com.pais.handy",
+  "identifier": "com.oat.hands",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",

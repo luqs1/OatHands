@@ -1,4 +1,4 @@
-# OpenOats Desktop - Meeting Feature Notes
+# OatHands Desktop - Meeting Feature Notes
 
 ## Goal
 Build a Windows `.exe` of Handy with a meeting notes feature:
