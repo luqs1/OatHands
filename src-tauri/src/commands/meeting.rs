@@ -1,7 +1,7 @@
 use crate::llm_client;
 use crate::meeting_session::{MeetingSessionManager, MeetingSessionSummary, Utterance};
 use crate::settings::get_settings;
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -61,7 +61,22 @@ pub async fn start_meeting(
     app: AppHandle,
     manager: State<'_, Arc<MeetingSessionManager>>,
 ) -> Result<String, String> {
-    manager.start_meeting().map_err(|e| e.to_string())
+    info!("[MEETING] start_meeting called");
+    match manager.start_meeting() {
+        Ok(session_id) => {
+            info!("[MEETING] Meeting started successfully: {}", session_id);
+            let _ = app.emit("meeting-log", &format!("Meeting started: {}", session_id));
+            Ok(session_id)
+        }
+        Err(e) => {
+            error!("[MEETING] Failed to start meeting: {}", e);
+            let _ = app.emit(
+                "meeting-log",
+                &format!("ERROR: Failed to start meeting: {}", e),
+            );
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -70,19 +85,40 @@ pub async fn stop_meeting(
     app: AppHandle,
     manager: State<'_, Arc<MeetingSessionManager>>,
 ) -> Result<MeetingSessionSummary, String> {
-    manager.stop_meeting().map_err(|e| e.to_string())
+    info!("[MEETING] stop_meeting called");
+    match manager.stop_meeting() {
+        Ok(summary) => {
+            info!(
+                "[MEETING] Meeting stopped: {} ({}s, {} utterances)",
+                summary.id, summary.duration_secs, summary.utterance_count
+            );
+            let _ = app.emit(
+                "meeting-log",
+                &format!("Meeting stopped: {} utterances", summary.utterance_count),
+            );
+            Ok(summary)
+        }
+        Err(e) => {
+            error!("[MEETING] Failed to stop meeting: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn is_meeting_active(manager: State<'_, Arc<MeetingSessionManager>>) -> bool {
-    manager.is_meeting_active()
+    let active = manager.is_meeting_active();
+    info!("[MEETING] is_meeting_active: {}", active);
+    active
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn get_current_session_id(manager: State<'_, Arc<MeetingSessionManager>>) -> Option<String> {
-    manager.get_current_session_id()
+    let session_id = manager.get_current_session_id();
+    info!("[MEETING] get_current_session_id: {:?}", session_id);
+    session_id
 }
 
 #[tauri::command]
@@ -90,6 +126,7 @@ pub fn get_current_session_id(manager: State<'_, Arc<MeetingSessionManager>>) ->
 pub fn list_meetings(
     manager: State<'_, Arc<MeetingSessionManager>>,
 ) -> Result<Vec<MeetingSessionSummary>, String> {
+    info!("[MEETING] list_meetings called");
     manager.list_meetings().map_err(|e| e.to_string())
 }
 
@@ -99,6 +136,7 @@ pub fn get_meeting_transcript(
     manager: State<'_, Arc<MeetingSessionManager>>,
     session_id: String,
 ) -> Result<Vec<Utterance>, String> {
+    info!("[MEETING] get_meeting_transcript: {}", session_id);
     manager
         .get_meeting_transcript(&session_id)
         .map_err(|e| e.to_string())
@@ -115,10 +153,16 @@ pub async fn generate_meeting_notes(
     system_prompt: String,
     template: String,
 ) -> Result<(), String> {
+    info!(
+        "[MEETING] generate_meeting_notes called for session: {}",
+        session_id
+    );
     let manager = app.state::<Arc<MeetingSessionManager>>();
     let utterances = manager
         .get_meeting_transcript(&session_id)
         .map_err(|e: anyhow::Error| e.to_string())?;
+
+    info!("[MEETING] Transcript has {} utterances", utterances.len());
 
     if utterances.is_empty() {
         return Err("No transcript available for this meeting".to_string());
@@ -154,6 +198,10 @@ pub async fn generate_meeting_notes(
         *flag = false;
     }
 
+    info!(
+        "[MEETING] Starting notes generation with provider: {}",
+        provider_id
+    );
     let app_clone = app.clone();
     llm_client::stream_chat_completion(
         &provider,
@@ -166,10 +214,13 @@ pub async fn generate_meeting_notes(
         },
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        error!("[MEETING] Notes generation failed: {}", e);
+        e.to_string()
+    })?;
 
     info!(
-        "Meeting notes generation completed for session: {}",
+        "[MEETING] Meeting notes generation completed for session: {}",
         session_id
     );
     Ok(())
@@ -178,6 +229,7 @@ pub async fn generate_meeting_notes(
 #[tauri::command]
 #[specta::specta]
 pub async fn cancel_notes_generation() -> Result<(), String> {
+    info!("[MEETING] cancel_notes_generation called");
     let mut flag = NOTES_CANCEL_FLAG.lock().await;
     *flag = true;
     Ok(())

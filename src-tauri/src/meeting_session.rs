@@ -182,11 +182,21 @@ impl MeetingSessionManager {
         tm: Arc<crate::managers::transcription::TranscriptionManager>,
     ) {
         if buffer.len() < 8000 {
+            debug!(
+                "[MEETING-TRANSCRIBE] Buffer too small ({} samples), skipping",
+                buffer.len()
+            );
             return;
         }
 
         let start_ms = Utc::now().timestamp_millis()
             - (buffer.len() as i64 * 1000 / TRANSCRIPTION_SAMPLE_RATE as i64);
+
+        info!(
+            "[MEETING-TRANSCRIBE] Transcribing {} samples for {:?}...",
+            buffer.len(),
+            speaker
+        );
 
         match tm.transcribe(buffer) {
             Ok(text) if !text.trim().is_empty() => {
@@ -197,22 +207,37 @@ impl MeetingSessionManager {
                     timestamp_ms: start_ms,
                     duration_ms: 0,
                 };
+                info!(
+                    "[MEETING-TRANSCRIBE] Got transcription: {} chars",
+                    utterance.text.len()
+                );
                 let _ = app_handle.emit("meeting-utterance", &utterance);
                 info!("[{:?}] {}", utterance.speaker, utterance.text);
             }
-            Ok(_) => {}
-            Err(e) => warn!("Transcription error: {}", e),
+            Ok(_) => {
+                debug!("[MEETING-TRANSCRIBE] Empty transcription result");
+            }
+            Err(e) => {
+                warn!("[MEETING-TRANSCRIBE] Transcription error: {}", e);
+            }
         }
     }
 
     pub fn start_meeting(&self) -> Result<String> {
         if self.is_active.load(Ordering::SeqCst) {
+            error!("[MEETING] start_meeting called but meeting already active");
             return Err(anyhow::anyhow!("A meeting is already active"));
         }
 
+        info!("[MEETING] Creating new meeting session...");
+
         let session_id = format!("meeting_{}", Utc::now().format("%Y-%m-%d_%H-%M-%S"));
         let session_dir = self.session_dir()?.join(&session_id);
+
+        info!("[MEETING] Session directory: {:?}", session_dir);
+
         fs::create_dir_all(&session_dir)?;
+        info!("[MEETING] Session directory created");
 
         let start_ms = Utc::now().timestamp_millis();
         let started_at = DateTime::from_timestamp_millis(start_ms)
@@ -228,22 +253,44 @@ impl MeetingSessionManager {
         let meta_path = session_dir.join("meta.json");
         let mut meta_file = File::create(&meta_path)?;
         serde_json::to_writer_pretty(&mut meta_file, &meta)?;
+        info!("[MEETING] Meta file written");
 
         let transcript_path = session_dir.join("transcript.jsonl");
         let transcript_file = File::create(&transcript_path)?;
         *self.transcript_file.lock().unwrap() = Some(BufWriter::new(transcript_file));
+        info!("[MEETING] Transcript file opened");
 
         *self.session_id.lock().unwrap() = Some(session_id.clone());
         *self.session_path.lock().unwrap() = Some(session_dir);
         *self.session_start_ms.lock().unwrap() = Some(start_ms);
 
-        self.start_mic_stream()?;
-        self.start_system_stream()?;
+        info!("[MEETING] Starting mic stream...");
+        if let Err(e) = self.start_mic_stream() {
+            error!("[MEETING] Failed to start mic stream: {}", e);
+            let _ = self
+                .app_handle
+                .emit("meeting-log", &format!("ERROR: Mic stream failed: {}", e));
+        } else {
+            info!("[MEETING] Mic stream started successfully");
+        }
+
+        info!("[MEETING] Starting system audio stream...");
+        if let Err(e) = self.start_system_stream() {
+            error!("[MEETING] Failed to start system stream: {}", e);
+            let _ = self
+                .app_handle
+                .emit("meeting-log", &format!("ERROR: System audio failed: {}", e));
+        } else {
+            info!("[MEETING] System stream started successfully");
+        }
 
         self.is_active.store(true, Ordering::SeqCst);
 
-        info!("Meeting started: {}", session_id);
+        info!("[MEETING] Meeting started: {}", session_id);
         let _ = self.app_handle.emit("meeting-started", &session_id);
+        let _ = self
+            .app_handle
+            .emit("meeting-log", &format!("Meeting started: {}", session_id));
 
         Ok(session_id)
     }
@@ -251,11 +298,35 @@ impl MeetingSessionManager {
     fn start_mic_stream(&self) -> Result<()> {
         let settings = get_settings(&self.app_handle);
         let host = crate::audio_toolkit::get_cpal_host();
+
+        info!(
+            "[MEETING-MIC] Looking for microphone: {:?}",
+            settings.selected_microphone
+        );
+
         let device = settings.selected_microphone.as_ref().and_then(|name| {
             host.input_devices()
                 .ok()?
                 .find(|d| d.name().as_ref().map(|n| n == name).unwrap_or(false))
         });
+
+        if device.is_none() {
+            warn!(
+                "[MEETING-MIC] Selected microphone '{}' not found, using default",
+                settings
+                    .selected_microphone
+                    .as_ref()
+                    .unwrap_or(&"unknown".to_string())
+            );
+        }
+
+        let actual_device = device.or_else(|| host.default_input_device());
+        if let Some(ref d) = actual_device {
+            info!("[MEETING-MIC] Using device: {:?}", d.name());
+        } else {
+            error!("[MEETING-MIC] No input device available!");
+            return Err(anyhow::anyhow!("No microphone available"));
+        }
 
         let mic_buffer = self.mic_buffer.clone();
         let is_active = self.is_active.clone();
@@ -268,7 +339,8 @@ impl MeetingSessionManager {
             buf.extend(samples);
         }) as Arc<dyn Fn(Vec<f32>) + Send + Sync>;
 
-        let capture = StreamingMicCapture::new(device, sample_cb)?;
+        let capture = StreamingMicCapture::new(actual_device, sample_cb)?;
+        info!("[MEETING-MIC] Stream created successfully");
 
         let buffer_clone = self.mic_buffer.clone();
         let app_clone = self.app_handle.clone();
@@ -276,6 +348,7 @@ impl MeetingSessionManager {
         let active_clone = self.is_active.clone();
 
         thread::spawn(move || {
+            info!("[MEETING-MIC] Buffer thread started");
             while active_clone.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_secs(3));
 
@@ -283,6 +356,7 @@ impl MeetingSessionManager {
                     let mut buf = buffer_clone.lock().unwrap();
                     let len = buf.len();
                     if len >= FLUSH_SAMPLES {
+                        debug!("[MEETING-MIC] Flushing {} samples for transcription", len);
                         let flush = buf.split_off(0);
                         *buf = if buf.capacity() > FLUSH_SAMPLES * 2 {
                             Vec::with_capacity(FLUSH_SAMPLES * 2)
@@ -298,17 +372,22 @@ impl MeetingSessionManager {
                     }
                     len
                 };
-                debug!("Mic buffer: {} samples", buf_len);
+                debug!("[MEETING-MIC] Buffer: {} samples", buf_len);
             }
 
             let remaining: Vec<f32> = buffer_clone.lock().unwrap().drain(..).collect();
             if !remaining.is_empty() {
+                debug!(
+                    "[MEETING-MIC] Transcribing {} remaining samples",
+                    remaining.len()
+                );
                 let app = app_clone.clone();
                 let tm = tm_clone.clone();
                 thread::spawn(move || {
                     Self::transcribe_buffer(remaining, Speaker::You, &app, tm);
                 });
             }
+            info!("[MEETING-MIC] Buffer thread ended");
         });
 
         *self.mic_capture.lock().unwrap() = Some(capture);
@@ -316,6 +395,7 @@ impl MeetingSessionManager {
     }
 
     fn start_system_stream(&self) -> Result<()> {
+        info!("[MEETING-SYSTEM] Initializing system audio capture...");
         let mut capture = crate::audio_toolkit::SystemAudioCapture::new();
 
         let buffer = self.system_buffer.clone();
@@ -329,10 +409,24 @@ impl MeetingSessionManager {
             buf.extend(samples);
         });
 
-        capture
-            .open()
-            .map_err(|e| anyhow::anyhow!("Failed to open system audio: {}", e))?;
+        match capture.open() {
+            Ok(()) => {
+                info!("[MEETING-SYSTEM] System audio opened successfully");
+                if let Some(name) = capture.device_name() {
+                    info!("[MEETING-SYSTEM] Device name: {}", name);
+                }
+            }
+            Err(e) => {
+                error!("[MEETING-SYSTEM] Failed to open system audio: {}", e);
+                let _ = self
+                    .app_handle
+                    .emit("meeting-log", &format!("ERROR: System audio failed: {}", e));
+                return Err(anyhow::anyhow!("Failed to open system audio: {}", e));
+            }
+        }
+
         capture.start().ok();
+        info!("[MEETING-SYSTEM] System audio capture started");
 
         let buffer_clone = self.system_buffer.clone();
         let app_clone = self.app_handle.clone();
@@ -340,6 +434,7 @@ impl MeetingSessionManager {
         let active_clone = self.is_active.clone();
 
         thread::spawn(move || {
+            info!("[MEETING-SYSTEM] Buffer thread started");
             while active_clone.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_secs(3));
 
@@ -347,6 +442,10 @@ impl MeetingSessionManager {
                     let mut buf = buffer_clone.lock().unwrap();
                     let len = buf.len();
                     if len >= FLUSH_SAMPLES {
+                        debug!(
+                            "[MEETING-SYSTEM] Flushing {} samples for transcription",
+                            len
+                        );
                         let flush = buf.split_off(0);
                         *buf = if buf.capacity() > FLUSH_SAMPLES * 2 {
                             Vec::with_capacity(FLUSH_SAMPLES * 2)
@@ -362,17 +461,22 @@ impl MeetingSessionManager {
                     }
                     len
                 };
-                debug!("System buffer: {} samples", buf_len);
+                debug!("[MEETING-SYSTEM] Buffer: {} samples", buf_len);
             }
 
             let remaining: Vec<f32> = buffer_clone.lock().unwrap().drain(..).collect();
             if !remaining.is_empty() {
+                debug!(
+                    "[MEETING-SYSTEM] Transcribing {} remaining samples",
+                    remaining.len()
+                );
                 let app = app_clone.clone();
                 let tm = tm.clone();
                 thread::spawn(move || {
                     Self::transcribe_buffer(remaining, Speaker::Them, &app, tm);
                 });
             }
+            info!("[MEETING-SYSTEM] Buffer thread ended");
         });
 
         *self.system_capture.lock().unwrap() = Some(capture);
@@ -384,13 +488,16 @@ impl MeetingSessionManager {
             return Err(anyhow::anyhow!("No active meeting to stop"));
         }
 
+        info!("[MEETING] Stopping meeting...");
         self.is_active.store(false, Ordering::SeqCst);
 
+        info!("[MEETING] Stopping system audio capture...");
         if let Some(mut capture) = self.system_capture.lock().unwrap().take() {
             capture.stop();
             capture.close();
         }
 
+        info!("[MEETING] Stopping mic capture...");
         *self.mic_capture.lock().unwrap() = None;
 
         let start_ms = self
@@ -425,7 +532,10 @@ impl MeetingSessionManager {
 
         let utterance_count = self.mic_buffer.lock().unwrap().len() / FLUSH_SAMPLES;
 
-        info!("Meeting stopped: {} ({}s)", session_id, duration_secs);
+        info!(
+            "[MEETING] Meeting stopped: {} ({}s, {} utterances)",
+            session_id, duration_secs, utterance_count
+        );
         let _ = self.app_handle.emit("meeting-stopped", &session_id);
 
         Ok(MeetingSessionSummary {
