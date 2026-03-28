@@ -838,6 +838,95 @@ async cancelNotesGeneration() : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+// --- New session coordinator commands (from session_coordinator.rs) ---
+async sessionStart() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_start") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionStop() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionDiscard() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_discard") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionLiveState() : Promise<Result<LiveSessionState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_live_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionIsRecording() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_is_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionList() : Promise<Result<SessionIndex[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionTranscript(sessionId: string) : Promise<Result<SessionRecord[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_transcript", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionDelete(sessionId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_delete", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionRename(sessionId: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_rename", { sessionId, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionTemplates() : Promise<Result<MeetingTemplate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_templates") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sessionGenerateNotes(sessionId: string, templateId: string | null) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_generate_notes", { sessionId, templateId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -889,6 +978,16 @@ export type Speaker = "you" | "them"
 export type Utterance = { id: string; speaker: Speaker; text: string; timestamp_ms: number; duration_ms: number }
 export type MeetingSessionSummary = { id: string; started_at: number; ended_at: number | null; duration_secs: number; utterance_count: number }
 export type MeetingSettings = { provider_id: string; model: string; api_key: string; system_prompt: string; template: string }
+
+// --- New session coordinator types (from domain/) ---
+export type LiveSessionState = { isRecording: boolean; sessionId: string | null; utteranceCount: number; volatileYouText: string; volatileThemText: string }
+export type SessionIndex = { id: string; startedAt: number; endedAt: number | null; templateSnapshot: TemplateSnapshot | null; title: string | null; utteranceCount: number; hasNotes: boolean; language: string | null; meetingApp: string | null; engine: string | null; tags: string[] | null; source: string | null }
+export type SessionRecord = { speaker: string; text: string; timestamp: number; suggestions: string[] | null; kbHits: string[] | null; suggestionDecision: SuggestionDecision | null; surfacedSuggestionText: string | null; conversationStateSummary: string | null; refinedText: string | null }
+export type MeetingTemplate = { id: string; name: string; icon: string; systemPrompt: string; isBuiltIn: boolean }
+export type TemplateSnapshot = { id: string; name: string; icon: string; systemPrompt: string }
+export type SuggestionDecision = { shouldSurface: boolean; confidence: number; relevanceScore: number; helpfulnessScore: number; timingScore: number; noveltyScore: number; reason: string; trigger: SuggestionTrigger | null }
+export type SuggestionTrigger = { kind: SuggestionTriggerKind; utteranceId: string; excerpt: string; confidence: number }
+export type SuggestionTriggerKind = "explicitQuestion" | "decisionPoint" | "disagreement" | "assumption" | "prioritization" | "customerProblem" | "distributionGoToMarket" | "productScope" | "unclear"
 
 /** tauri-specta globals **/
 

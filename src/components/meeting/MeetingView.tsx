@@ -1,36 +1,45 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Calendar, Clock, MessageSquare, ChevronRight } from "lucide-react";
-import { useMeetingsStore } from "@/stores/meetingStore";
+import { Calendar, Clock, MessageSquare, ChevronRight, FileText, Trash2, Tag } from "lucide-react";
+import { useSessionStore } from "@/stores/sessionStore";
 import { MeetingControlBar } from "./MeetingControlBar";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { NotesPanel } from "./NotesPanel";
-import type { MeetingSessionSummary } from "@/bindings";
 
 type Tab = "transcript" | "notes";
 
 export const MeetingView: React.FC = () => {
   const { t } = useTranslation();
   const {
-    isActive,
-    currentSessionId,
-    pastMeetings,
-    currentMeeting,
-  } = useMeetingsStore();
+    isRecording,
+    sessionId,
+    sessions,
+    selectedSessionId,
+    selectSession,
+    deleteSession,
+    initialize,
+  } = useSessionStore();
   const [activeTab, setActiveTab] = useState<Tab>("transcript");
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
 
-  const displaySessionId = isActive ? currentSessionId : (selectedSession ?? currentMeeting?.id ?? null);
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  const displaySessionId = isRecording ? sessionId : selectedSessionId;
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleDateString(undefined, {
+    return new Date(timestamp).toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
       year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
-  const formatDuration = (secs: number) => {
+  const formatDuration = (startMs: number, endMs: number | null) => {
+    if (!endMs) return "ongoing";
+    const secs = Math.floor((endMs - startMs) / 1000);
     const mins = Math.floor(secs / 60);
     return `${mins} min`;
   };
@@ -39,41 +48,62 @@ export const MeetingView: React.FC = () => {
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <MeetingControlBar />
 
-      {!isActive && pastMeetings.length > 0 && (
+      {!isRecording && sessions.length > 0 && (
         <div className="bg-mid-gray/5 rounded-xl border border-mid-gray/20 p-4">
           <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
             <Calendar size={14} />
             {t("meeting.history.title")}
           </h3>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {pastMeetings.slice(0, 10).map((meeting) => (
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {sessions.slice(0, 20).map((session) => (
               <button
-                key={meeting.id}
-                onClick={() => setSelectedSession(meeting.id)}
-                className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                  selectedSession === meeting.id
+                key={session.id}
+                onClick={() => selectSession(session.id)}
+                className={`w-full text-left p-3 rounded-lg border transition-colors group ${
+                  selectedSessionId === session.id
                     ? "border-logo-primary/50 bg-logo-primary/5"
                     : "border-transparent hover:bg-mid-gray/10"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Clock size={14} className="text-mid-gray" />
-                    <div>
-                      <div className="text-sm font-medium">
-                        {formatDate(meeting.started_at)}
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <Clock size={14} className="text-mid-gray shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {session.title || formatDate(session.startedAt)}
                       </div>
                       <div className="text-xs text-mid-gray flex items-center gap-2">
-                        <span>{formatDuration(meeting.duration_secs)}</span>
+                        {!session.title && <span>{formatDuration(session.startedAt, session.endedAt)}</span>}
+                        {session.title && <span>{formatDate(session.startedAt)}</span>}
                         <span>·</span>
-                        <span>
-                          {meeting.utterance_count}{" "}
-                          {t("meeting.history.utterances")}
-                        </span>
+                        <span>{session.utteranceCount} utterances</span>
+                        {session.hasNotes && (
+                          <>
+                            <span>·</span>
+                            <FileText size={10} className="text-logo-primary" />
+                          </>
+                        )}
+                        {session.meetingApp && (
+                          <>
+                            <span>·</span>
+                            <span>{session.meetingApp}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <ChevronRight size={14} className="text-mid-gray" />
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSession(session.id);
+                      }}
+                      className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition-all"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                    <ChevronRight size={14} className="text-mid-gray" />
+                  </div>
                 </div>
               </button>
             ))}
@@ -81,7 +111,7 @@ export const MeetingView: React.FC = () => {
         </div>
       )}
 
-      {(isActive || displaySessionId) && (
+      {(isRecording || displaySessionId) && (
         <div className="bg-mid-gray/5 rounded-xl border border-mid-gray/20 overflow-hidden">
           <div className="flex border-b border-mid-gray/20">
             <button

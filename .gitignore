@@ -43,3 +43,4 @@ result
 
 # Test fixtures (models are too large for git)
 src-tauri/test-fixtures/
+OatHands

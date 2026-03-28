@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Copy, Loader2, AlertCircle } from "lucide-react";
-import { useMeetingsStore } from "@/stores/meetingStore";
+import { useSessionStore } from "@/stores/sessionStore";
 
 interface NotesPanelProps {
   sessionId?: string | null;
@@ -14,9 +14,11 @@ export const NotesPanel: React.FC<NotesPanelProps> = ({ sessionId }) => {
     notesError,
     isGeneratingNotes,
     generateNotes,
-    cancelNotesGeneration,
     clearNotes,
-  } = useMeetingsStore();
+    templates,
+    selectedTemplateId,
+    selectTemplate,
+  } = useSessionStore();
 
   const handleGenerateNotes = () => {
     if (sessionId) {
@@ -37,24 +39,37 @@ export const NotesPanel: React.FC<NotesPanelProps> = ({ sessionId }) => {
           {t("meeting.notes.title")}
         </h3>
         {sessionId && (
-          <button
-            onClick={
-              isGeneratingNotes ? cancelNotesGeneration : handleGenerateNotes
-            }
-            disabled={isGeneratingNotes && !notes}
-            className="text-xs px-3 py-1.5 rounded-lg bg-logo-primary/80 text-white hover:bg-logo-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            {isGeneratingNotes ? (
-              <>
-                <Loader2 size={12} className="animate-spin" />
-                {t("meeting.notes.generating")}
-              </>
-            ) : notes ? (
-              t("meeting.notes.regenerate")
-            ) : (
-              t("meeting.notes.generate")
+          <div className="flex items-center gap-2">
+            {templates.length > 0 && (
+              <select
+                value={selectedTemplateId ?? ""}
+                onChange={(e) => selectTemplate(e.target.value)}
+                className="text-xs px-2 py-1.5 rounded-lg border border-mid-gray/30 bg-transparent"
+              >
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             )}
-          </button>
+            <button
+              onClick={handleGenerateNotes}
+              disabled={isGeneratingNotes}
+              className="text-xs px-3 py-1.5 rounded-lg bg-logo-primary/80 text-white hover:bg-logo-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              {isGeneratingNotes ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  {t("meeting.notes.generating")}
+                </>
+              ) : notes ? (
+                t("meeting.notes.regenerate")
+              ) : (
+                t("meeting.notes.generate")
+              )}
+            </button>
+          </div>
         )}
       </div>
 

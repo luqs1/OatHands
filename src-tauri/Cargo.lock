@@ -1198,6 +1198,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+dependencies = [
+ "dispatch2",
+ "nix 0.31.2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2476,6 +2487,7 @@ dependencies = [
  "chrono",
  "clap",
  "cpal",
+ "ctrlc",
  "enigo",
  "env_filter",
  "ferrous-opencc",
@@ -2485,6 +2497,7 @@ dependencies = [
  "gtk-layer-shell",
  "handy-keys",
  "hound",
+ "lazy_static",
  "log",
  "natural",
  "once_cell",
@@ -2523,8 +2536,10 @@ dependencies = [
  "tauri-specta",
  "tempfile",
  "tokio",
+ "tokio-util",
  "transcribe-rs",
  "url",
+ "uuid",
  "vad-rs",
  "whisper-rs",
  "whisper-rs-sys",
@@ -3589,6 +3604,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
+dependencies = [
+ "bitflags 2.11.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nodrop"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4133,7 +4160,7 @@ checksum = "e4022a17595a00d6a369236fdae483f0de7f0a339960a53118b818238e132224"
 dependencies = [
  "android_system_properties",
  "log",
- "nix",
+ "nix 0.30.1",
  "objc2",
  "objc2-foundation",
  "objc2-ui-kit",
